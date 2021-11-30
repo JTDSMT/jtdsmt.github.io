@@ -1,0 +1,475 @@
+*PAGETOP*
+===================================================================================================
+Some General Commands
+#### Setup static Route since BGP Peering will be initialized using Lo0
+
+ip route 1.1.1.1 255.255.255.255 ser3/0    # Static Route from Lo0 to R1
+ip route 2.2.2.2 255.255.255.255 ser3/2    # Static Route from Lo0 to R2
+
+#### Static Default Route
+ip route 0.0.0.0 0.0.0.0 endpointip
+
+===================================================================================================
+*WANL2*
+KU1.1
+
+
+The data link layer is responsible for the node-to-node delivery of the message. 
+The main function of this layer is to make sure data transfer is error-free from one node to another, over the physical layer. 
+When a packet arrives in a network, it is the responsibility of DLL to transmit it to the Host using its MAC address. 
+Data Link Layer is divided into two sublayers:  
+Logical Link Control (LLC)Media Access Control (MAC)
+The packet received from the Network layer is further divided into frames depending on the frame size of NIC(Network Interface Card). DLL also encapsulates Sender and Receiver’s MAC address in the header.
+
+- SDLC
+- HLDC
+- SLIP
+- PPP
+- LCP
+- LAP
+- NCP
+===================================================================================================
+===================================================================================================
+*WANL3*
+KU1.3 
+WAN 3 Protocols
+
+- NAT
+- IP Protocol
+- ICMP
+- RIP
+- OSPF
+- BGP
+- IPSec
+===================================================================================================
+===================================================================================================
+KU2.1
+
+
+ISP Reducdancy
+Single Homed: One single IsP Link (Normal)
+Dual Homed: Double Links to a Single IsP
+MultiHomed: Having more than 1 ISP provider links.
+Dual Multihomed: When having dual links to different ISPs.
+
+In dual setups, theres usually a primary and the second link acts as a failover. It can be routed via Static Route or BGP.
+
+
+***************************************************************************************************
+Dual Homed Sample Topology - 1 ISP with Dual Links
+#### Static route as Default Route ( Anything that doesnt know forwards to this route).
+
+#### GW 1 - Primary Router
+
+ip route 0.0.0.0 0.0.0.0 endpointip
+    router eigrp 1
+    redistribute static metric 20000 1 255 1 1500
+    
+#### GW 2 - Failover Link Router
+
+ip route 0.0.0.0 0.0.0.0 endpointip
+    router eigrp 1
+    redistribute static metric 20000 1 255 1 1500
+***************************************************************************************************
+
+
+===================================================================================================
+===================================================================================================
+*PBR-IPSLA*
+KU2.2 
+
+Objectives:
+HTTP Traffic from HR & Admin goes through R2.
+SSH Traffic from Admin passes through R2.
+Any other traffic passes through R3.
+
+
+1. Create ACL & Attach with the Route-Map.
+
+***************************************************************************************************
+configure terminal
+ip access-list extended 101/acl_name_allow
+    10 permit tcp 192.168.10.0 0.0.0.255 any eq 80
+    20 permit tcp 192.168.20.0 0.0.0.255 any eq 80
+    30 permit tcp 192.168.10.0 0.0.0.255 any eq 22
+    
+    
+#### The above ACL tackles the first two bullets.
+#### Create Route map to match ACLs
+R1
+configure terminal
+route-map PBR permit 10
+    match ip address 101/acl_name_allow
+        set ip next-hop 10.0.0.2
+        exit
+    exit
+    
+####    Anything else passes through R3.
+####    No need to create another ACL to permit any/any
+####    Thus specify it directly in the Route-map
+route-map PBR permit 20
+        set ip next-hop 10.0.0.6  (R3)
+
+***************************************************************************************************
+2. Testing - Telnet from Hr/Admin PC
+	sh route-map
+
+3. IPSLA - Tracking: With tracking, we can say if Lo1 (2.2.2.2) is down, then the Routing Table takes precedence.
+	Tracking logic:
+		- Tracking of loopback on R2. If loopback is alive then proceed with the Above ACL/Route-map.
+		- If the object (loopback) is not reachable then a different condition will be applied.
+On the ABR
+####    R1
+	configure terminal 
+	ip sla 1
+	icmp-echo 2.2.2.2  #### Type of tracking procotol - Destination - Frequency
+	frequency 5        #### Frequency of every 5 seconds / Will send an echo (Ping)
+	exit
+####                Schedule the Tracking (Cronjob)
+	conf t
+	ip sla schedule 1 life forever start-time now
+####                The Object Tracking must be 'turned on'
+	conf t
+	track 1 ip sla 1 reachability
+
+Assigning the Logic (Object Tracking) to the Route Map
+
+	route-map PBR permit 10
+		no set ip next-hop 10.0.0.2            #### Removing the old entry
+####    Setting the Tracking object logic in the Route map
+	set ip next-hop verify-availability 10.0.0.2 1 track 1
+	show track                ##### Check the object tracking availability.
+	show route-map            ##### Check Route map status etc.
+
+===================================================================================================
+===================================================================================================
+AA1.2 
+
+*FrameRelay P2P*
+
+R1 - R1 is the HUB
+
+R1(config)#frame-relay switching
+R1(config)#int s0/0
+R1(config-if)#encapsulation frame-relay
+R1(config-if)#frame-relay intf-type dte
+R1(config-if)#int s0/0.102 point-to-point
+R1(config-if)#ip address 10.1.1.1 255.255.255.0
+R1(config-if)#frame-relay interface-dlci 102
+R1(config-if)#int s0/0.103 point-to-point
+R1(config-if)#ip address 10.1.2.1 255.255.255.0
+R1(config-if)#frame-relay interface-dlci 103
+R1(config-if)#no shut
+
+R2
+R2(config)#frame-relay switching
+R2(config)#int s0/0
+R2(config-if)#encapsulation frame-relay
+R2(config-if)#frame-relay intf-type dte
+R2(config-if)#int s0/0.201 point-to-point
+R2(config-if)#ip address 10.1.1.2 255.255.255.0
+R2(config-if)#frame-relay interface-dlci 201
+R2(config-if)#no shut
+
+R3
+R3(config)#frame-relay switching
+R3(config)#int s0/0
+R3(config-if)#encapsulation frame-relay
+R3(config-if)#frame-relay intf-type dte
+R3(config-if)#int s0/0.301 point-to-point
+R3(config-if)#ip address 10.1.2.3 255.255.255.0
+R3(config-if)#frame-relay interface-dlci 301
+R3(config-if)#no shut
+
+Task 4:
+R1
+R1#ping 10.1.1.2
+R1#ping 10.1.2.3
+
+
+Task 5:
+R2(config)#ip route 0.0.0.0 0.0.0.0 s0/0.201
+
+R3(config)#ip route 0.0.0.0 0.0.0.0 s0/0.301
+
+Task 6:
+R1#show frame-relay map
+R1#show frame-relay pvc
+
+***************************************************************************************************
+FrameRelay MultiPoint
+
+HQ = DLCI = 110 & DLCI = 120 | Serial S0/0/0.1 | 10.1.1.1/24
+Branch1 = DLCI = 110 | 10.1.1.2/24
+Branch2 = DLCI = 120 | 10.1.1.3/24
+
+
+HQ(router)#interface Serial0/0/0
+HQ(router-if)#no ip address
+HQ(router-if)#encapsulation frame-relay
+HQ(router-if)#interface Serial0/0/0.1 multipoint
+HQ(router-subif)#ip address 10.1.1.1 255.255.255.0
+HQ(router-subif)#bandwidth 64
+HQ(router-subif)#frame-relay map ip 10.1.1.2 110 broadcast
+HQ(router-subif)#frame-relay map ip 10.1.1.3 120 broadcast
+
+BR1(router)#interface Serial0/0/0
+BR1(router-if)#encapsulation frame-relay
+BR1(router-subif)#ip address 10.1.1.2 255.255.255.0
+BR1(router-subif)#bandwidth 64
+BR1(router-subif)#frame-relay map ip 10.1.1.1 110 broadcast
+BR1(router-subif)#frame-relay map ip 10.1.1.3 110
+
+BR2(router)#interface Serial0/0/0
+BR2(router-if)#encapsulation frame-relay
+BR2(router-subif)#ip address 10.1.1.3 255.255.255.0
+BR2(router-subif)#bandwidth 64
+BR2(router-subif)#frame-relay map ip 10.1.1.1 210 broadcast
+BR2(router-subif)#frame-relay map ip 10.1.1.2 210
+
+- Ping
+show frame-relay map
+show frame-relay pvc
+
+===================================================================================================
+===================================================================================================
+*PATHCONTROL*
+AA2.3 
+
+*WEIGHT*
+	- Higher Weight = Higher Preference
+	- Remember ABR in this scenario = R3. R3 will learn of the External Destinations from different AS. 
+		What we want here is that so when R3 learns the Route, it sets a weight on it.
+	
+***************************************************************************************************
+
+	Example Scenario Preferred Router Path = R3 = Configuration on R3
+1. Create the ACL
+    ip access-list standard ACL_WEIGHT
+        10 permit host 111.111.1.1 [111. = Source Endpoint (External)]
+        exit
+2. Create route map and match the ACL
+    route-map local_weight permit 10
+        match ip_address ACL_WEIGHT
+        set weight 50
+        
+    route-map local_weight permit 20
+        set weight 0    
+        exit
+3. Apply the Route map in the BGP process with the neighbor.
+    router bgp 200
+    neighbor 3.3.3.3 route-map local_weight in   [3.3 (R3) = Source Endoint BGP Peer Lo0]
+
+***************************************************************************************************
+***************************************************************************************************
+
+*LOCALPREF*
+
+	- The higher the preference number, the higher priority.
+	- Default Local Preference value = 100
+	- Example: In this instance, since both R2 and R3 have a local pref of 100, the Local preference should be increased on R3 so it uses the bottom path.
+
+Example Scenario Preferred Router Path = R3 = Configuration on R3
+1. Create the ACL
+    ip access-list standard ACL_1
+        10 permit host 111.111.1.1 [111. = Source Endpoint (External)]
+        exit
+2. Create route map and match the ACL
+    route-map local_pref permit 10
+        match ip_address ACL_1
+        set local-preference 150
+        exit
+3. Apply the Route map in the BGP process with the neighbor.
+    router bgp 200
+    neighbor 1.1.1.1 route-map local_pref in   [1.1 = Source Endoint BGP Peer Lo0]
+
+***************************************************************************************************
+***************************************************************************************************
+
+*MED* 
+
+MED - Influences the other routers on different AS's - In the example : Both R2 and R3 send MED to influence R1 so they both let him know from where to pass.
+Lower MED is preferred.
+
+1. Create the ACL - Only if the criteria wants a specific Route to pass via somewhere.
+    ip access-list standard ACL_1
+        10 permit host 111.111.1.1 [111. = Source Endpoint (Internal/Local)]
+        exit
+    
+ 2. Create route map and match the ACL
+    route-map set_med permit 10
+        match ip_address ACL_1  # If using an ACL
+        set local-preference 150  # Lowest MED Takes precedence.
+        exit   
+    
+    
+3. Apply the Route map in the BGP process with the neighbor on both Routers.
+    router bgp []
+    neighbor 1.1.1.1 route-map set_med out
+    
+    Repeat on the other ABR router within the same AS.
+
+
+***************************************************************************************************
+***************************************************************************************************
+
+*PATHCONTROL-IPSLA*
+
+IPSLA - Tracking: With tracking, we can say if Lo1 (2.2.2.2) is down, then the Routing Table takes precedence.
+	Tracking logic:
+		- Tracking of loopback on R2. If loopback is alive then proceed with the Above ACL/Route-map.
+		- If the object (loopback) is not reachable then a different condition will be applied.
+
+On the ABR
+***************************************************************************************************
+####    R1
+	configure terminal 
+	ip sla 1
+	icmp-echo 2.2.2.2  #### Type of tracking procotol - Destination - Frequency
+	frequency 5        #### Frequency of every 5 seconds / Will send an echo (Ping)
+	exit
+####                Schedule the Tracking (Cronjob)
+	conf t
+	ip sla schedule 1 life forever start-time now
+####                The Object Tracking must be 'turned on'
+	conf t
+	track 1 ip sla 1 reachability
+
+Assigning the Logic (Object Tracking) to the Route Map
+
+####    Setting the Tracking object logic in the Route map
+	set ip next-hop verify-availability 10.0.0.2 1 track 1
+	show track                ##### Check the object tracking availability.
+	show route-map            ##### Check Route map status etc.
+
+
+===================================================================================================
+===================================================================================================
+*VPN*
+AA3.2 
+
+Phase 1 : HAGLE (Management Setup)
+
+crypto isakmp policy 1
+ encr aes 256
+ hash sha512
+ authentication pre-share
+ group 5
+crypto isakmp key letmein address 12.12.12.5     # Set IP of the other Endpoint.
+!
+
+
+Phase 2:  Data Tunnel Setup
+Create ACL
+Create Transform Set
+
+#### Create an extended ACL - Permit local LAN -> Endpoint LAN -> Subnet Mask /24
+ip access-list extended crypto_acl
+ permit ip 192.168.1.0 0.0.0.255 192.168.3.0 0.0.0.255
+!
+#### Create Transform set 
+crypto ipsec transform-set myset esp-aes
+!
+!
+#### Create a VPN route map and attach the ACL & Transform set to it.
+crypto map mymap 1 ipsec-isakmp 
+ set peer 12.12.12.5
+ set transform-set myset 
+ match address crypto_acl
+
+Phase 3: Attach the Cryptomap with the endpoint interface
+
+#### The interface which will be used for the VPN tunnel is Fa0/0.
+	interface FastEthernet0/0
+	crypto map mymap
+
+
+ping 192.168.3.0 source fa0/0
+
+IMP show commands
+To check Phase 1 - show crypto isakmp sa
+To check Phase 2 - show crypto ipsec sa
+
+
+===================================================================================================
+===================================================================================================
+*BGP*
+
+BGP Commands
+show ip bgp
+sh run | sec bgp
+show ip bgp summary/neighbors
+
+Underlying Dynamic Routing Protocol
+OSPF Setup
+
+***************************************************************************************************
+
+#### R2 OSPF Setup
+router ospf 1
+    network 2.2.2.2 0.0.0.0 area 0   # Advertising the iBGP Loopback
+    network 10.0.0.0 0.0.0.3 area 0
+    network 10.0.0.4 0.0.0.3 area 0
+    
+#### R3 OSPF Setup
+router ospf 1
+    network 3.3.3.3 0.0.0.0 area 0   # Advertising the iBGP Loopback
+    network 10.0.0.13 0.0.0.3 area 0
+    network 10.0.0.4 0.0.0.3 area 0
+    
+#### R4 OSPF Setup
+router ospf 1
+    network 4.4.4.4 0.0.0.0 area 0   # Advertising the iBGP Loopback
+    network 10.0.0.0 0.0.0.3 area 0
+    network 10.0.0.8 0.0.0.3 area 0   
+    
+#### R5 OSPF Setup
+router ospf 1
+    network 5.5.5.5 0.0.0.0 area 0   # Advertising the iBGP Loopback
+    network 10.0.0.12 0.0.0.3 area 0
+    network 10.0.0.8 0.0.0.3 area 0 
+
+***************************************************************************************************
+*eBGP*
+##### Creating BGP Process (ASN 100) - External BGP
+# R1
+conf t
+router bgp 100
+neighbor 2.2.2.2 remote-as 200
+neighbor 2.2.2.2 description eBGP Link to R2
+neighbor 2.2.2.2 ebgp-multihop 2 ## neighbors are defined using Loopbacks, which considers these networks as being 2 hops away.
+neighbor 2.2.2.2 update-source Loopback0  ## Use Lo0 for BGP peering.
+#### Advertising Lo1-3 in eBGP
+# R1
+router bgp 100   -> Entering ASN 100 Process
+network 11.11.11.11 mask 255.255.255.255  # Note in BGP we use Subnet not Wildcard to advertise.
+network 12.12.12.12 mask 255.255.255.255
+network 13.13.13.13 mask 255.255.255.255
+
+***************************************************************************************************
+*iBGP*
+
+R3 - ABR
+router bgp 300
+neighbor 4.4.4.4 remote-as 300    # Peering with R4
+neighbor 4.4.4.4 update-source lo0    # Using Lo0 for BGP Peering
+neighbor 4.4.4.4 next-hop-self     # Cause it's ABR
+neighbor 5.5.5.5 remote-as 300    # Peering with R5
+neighbor 5.5.5.5 update-source lo0    # Using Lo0 for BGP Peering
+neighbor 5.5.5.5 next-hop-self 
+neighbor 6.6.6.6 remote-as 300    # Peering with R6
+neighbor 6.6.6.6 update-source lo0    # Using Lo0 for BGP Peering
+neighbor 6.6.6.6 next-hop-self 
+R4
+router bgp 300
+neighbor 3.3.3.3 remote-as 300    # Peering with R3
+neighbor 3.3.3.3 update-source lo0    # Using Lo0 for BGP Peering
+neighbor 5.5.5.5 remote-as 300    # Peering with R5
+neighbor 5.5.5.5 update-source lo0    # Using Lo0 for BGP Peering
+neighbor 6.6.6.6 remote-as 300    # Peering with R6
+neighbor 6.6.6.6 update-source lo0    # Using Lo0 for BGP Peering
+
+Verifying BGP
+
+show ip bgp
+show ip bgp summary
